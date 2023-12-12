@@ -1,4 +1,4 @@
-package YoloCache
+package yolocache
 
 import (
 	"fmt"
@@ -19,17 +19,26 @@ Group是YoloCache最核心的数据结构，负责与用户交互，控制缓存
 */
 
 type Group struct {
-	// 一个Group可以认为是一个缓存的命名空间，每个Group拥有一个唯一地名称name
+	// 一个Group可以认为是一个缓存的命名空间，每个Group拥有一个唯一的名称name
 	//比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
 	name      string
-	getter    Getter // 第二个属性是 getter Getter，即缓存未命中时获取源数据的回调(callback)。
-	mainCache cache  // 第三个属性是 mainCache cache，即一开始实现的并发缓存。
+	getter    Getter     // 第二个属性是 getter Getter，即缓存未命中时获取源数据的回调(callback)。
+	mainCache cache      // 第三个属性是 mainCache cache，即一开始实现的并发缓存。
+	peers     PeerPicker // 将用于获取远程节点
 }
 
 var (
 	mu     sync.RWMutex              // 全局的锁
 	groups = make(map[string]*Group) // 全局的一个groups
 )
+
+// RegisterPeers RegisterPeers方法，将 实现了 PeerPicker 接口的 HTTPPool 注入到 Group 中。
+func (g *Group) RegisterPeers(peers PeerPicker) {
+	if g.peers != nil {
+		panic("RegisterPeerPicker called more than once")
+	}
+	g.peers = peers
+}
 
 // NewGroup 构建NewGroup， 实例化Group
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
@@ -73,7 +82,7 @@ func (g *Group) Get(key string) (ByteView, error) {
 		return v, nil
 	}
 	/*
-		缓存不存在，则调用 load 方法，
+		缓存不存在，尝试去其他节点寻找缓存。 调用 load 方法，
 		load 调用 getLocally（分布式场景下会调用 getFromPeer 从其他节点获取），
 		getLocally 调用用户回调函数 g.getter.Get() 获取源数据，
 		并且将源数据添加到缓存 mainCache 中（通过 populateCache 方法）
@@ -81,11 +90,33 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
+// 当在本节点没有找到时，调用load尝试从其他节点获取
 // 设计时预留：分布式场景下，load 会先从远程节点获取 getFromPeer，失败了再回退到 getLocally
 func (g *Group) load(key string) (value ByteView, err error) {
+	// 如果有其他节点存在
+	if g.peers != nil {
+		// 如果是分布式节点，从其他节点获取， 这里p返回的peer是目标节点的
+		if peer, ok := g.peers.PickPeer(key); ok {
+			// 再用这个baseurl传入getFromPeer函数中，去获取这个key的value
+			if value, err = g.getFromPeer(peer, key); err == nil {
+				return value, nil // 从其他节点获取成功，返回
+			}
+			log.Println("[YoloCache] Failed to get from peer", err)
+		}
+	}
 	return g.getLocally(key)
 }
 
+func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
+	// 调用peer的Get方法，向其他节点发起请求，查询value
+	bytes, err := peer.Get(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+	return ByteView{b: bytes}, nil
+}
+
+// 从本地没找到，先尝试去从其他节点找，如果其他节点也没找到的话，那就再返回本地来，去调用的回调函数，获取数据源中的数据，再添加到缓存中并返回
 func (g *Group) getLocally(key string) (ByteView, error) {
 	// 调用用户回调函数g.getter.Get() 获取源数据
 	bytes, err := g.getter.Get(key) // Get方法返回f(key)， 这里也就是把key传到用户提供的匿名函数中，调用获取返回值
