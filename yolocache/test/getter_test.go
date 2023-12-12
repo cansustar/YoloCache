@@ -1,6 +1,7 @@
-package YoloCache
+package test
 
 import (
+	"YoloCache/yolocache"
 	"reflect"
 	"testing"
 )
@@ -12,7 +13,7 @@ import (
 
 func TestGetter(t *testing.T) {
 	//
-	var f Getter = GetterFunc(func(key string) ([]byte, error) {
+	var f yolocache.Getter = yolocache.GetterFunc(func(key string) ([]byte, error) {
 		// 将key转换为字节数组 x.(T) 才是类型断言
 		return []byte(key), nil
 	})

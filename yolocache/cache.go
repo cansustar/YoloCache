@@ -1,10 +1,10 @@
-package YoloCache
+package yolocache
 
 /*
 **********************为lru.Cache添加并发特性*********************************
  */
 import (
-	"YoloCache/lru"
+	"YoloCache/yolocache/lru"
 	"sync"
 )
 
@@ -80,6 +80,7 @@ func (c *cache) get(key string) (value ByteView, ok bool) {
 	}
 	// 4. 获取值
 	if v, ok := c.lru.Get(key); ok {
+		// 5. 类型断言
 		return v.(ByteView), ok
 	}
 	return

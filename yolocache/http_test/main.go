@@ -1,7 +1,7 @@
 package main
 
 import (
-	"YoloCache"
+	"YoloCache/yolocache"
 	"fmt"
 	"log"
 	"net/http"
@@ -16,7 +16,7 @@ var db = map[string]string{
 }
 
 func main() {
-	YoloCache.NewGroup("scores", 2<<10, YoloCache.GetterFunc(
+	yolocache.NewGroup("scores", 2<<10, yolocache.GetterFunc(
 		func(key string) ([]byte, error) {
 			log.Println("[SlowDB] search key", key)
 			if v, ok := db[key]; ok {
@@ -26,7 +26,7 @@ func main() {
 		}))
 
 	addr := "localhost:9999"
-	peers := YoloCache.NewHTTPPool(addr)
+	peers := yolocache.NewHTTPPool(addr)
 	log.Println("yolocache is running at", addr)
 	log.Fatal(http.ListenAndServe(addr, peers))
 }

@@ -1,4 +1,4 @@
-package YoloCache
+package yolocache
 
 // 使用sync.Mutex封装LRU的几个方法，使之支持并发的读写
 

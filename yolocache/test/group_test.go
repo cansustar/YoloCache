@@ -1,6 +1,7 @@
-package YoloCache
+package test
 
 import (
+	"YoloCache/yolocache"
 	"fmt"
 	"log"
 	"testing"
@@ -14,7 +15,7 @@ var db = map[string]string{
 
 func TestGet(t *testing.T) {
 	loadCounts := make(map[string]int, len(db))
-	gee := NewGroup("scores", 2<<10, GetterFunc(
+	gee := yolocache.NewGroup("scores", 2<<10, yolocache.GetterFunc(
 		// 缓存为空回回来调用回调函数，这里的判断都是在Cache中没有找到的情况下。 回调函数用来在数据源中查找缓存值（类比一下redis和mysql）
 		func(key string) ([]byte, error) {
 			log.Println("[SlowDB] search key", key)
