@@ -81,6 +81,7 @@ func (g *Group) Get(key string) (ByteView, error) {
 	return g.load(key)
 }
 
+// 设计时预留：分布式场景下，load 会先从远程节点获取 getFromPeer，失败了再回退到 getLocally
 func (g *Group) load(key string) (value ByteView, err error) {
 	return g.getLocally(key)
 }
