@@ -18,23 +18,37 @@ type cache struct {
 }
 
 // 封装get和add方法，并添加互斥锁mu
-//func (c *cache) add(key string, value ByteView) {
+// func (c *cache) add(key string, value ByteView) {
 // TODO:这里有较大的优化空间，add操作不管是否存在lru,都会加一个锁
-//	c.mu.Lock()
-//	defer c.mu.Unlock()
-//	// 这里的lru有点类似一个单例,对吗
-//	// a: 是的，这里的lru是一个单例
-//	if c.lru == nil {
-//		c.lru = lru.New(c.cacheBytes, nil)
+//
+//		c.mu.Lock()
+//		defer c.mu.Unlock()
+//		// 这里的lru有点类似一个单例,对吗
+//		// a: 是的，这里的lru是一个单例
+//		if c.lru == nil {
+//			c.lru = lru.New(c.cacheBytes, nil)
+//		}
+//		c.lru.Add(key, value)
 //	}
+
+// TODO  是我错了，Add方法涉及到了对map的写操作，所以Add也要在锁内
+//func (c *cache) add(key string, value ByteView) {
+//	c.once.Do(func() {
+//		c.lru = lru.New(c.cacheBytes, nil)
+//	})
+//	// 不需要加锁，因为 sync.Once.Do 保证其中的函数只执行一次
 //	c.lru.Add(key, value)
 //}
+//
 
+// 最终的修改解决方案
 func (c *cache) add(key string, value ByteView) {
 	c.once.Do(func() {
 		c.lru = lru.New(c.cacheBytes, nil)
 	})
-	// 不需要加锁，因为 sync.Once.Do 保证其中的函数只执行一次
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// 确保在初始化完成后再执行 Add 操作
 	c.lru.Add(key, value)
 }
 
@@ -65,19 +79,39 @@ func (c *cache) add(key string, value ByteView) {
 //		}
 //		return
 //	}
+// # TODO 最开始的修改版本， 感觉做了无意义的双重检查，以及，get操作需要加锁吗？get方法里涉及到了对map的读，和对链表节点的移动，这似乎是并发安全的（GPT说的）
+// TODO!!!! 兔兔老师在评论区里说，cache 的 get 和 add 都涉及到写操作(LRU 将最近访问元素移动到链表头)，所以不能直接改为读写锁。 所以get应该还得加锁
+//func (c *cache) get(key string) (value ByteView, ok bool) {
+//	// 这里的思想是 双重检查锁定  当然可以用once来优化
+//	// 1. 先检查 lru 是否为 nil
+//	if c.lru == nil {
+//		return
+//	}
+//	// 2. 加锁
+//	c.mu.Lock()
+//	defer c.mu.Unlock()
+//	// 3. 检查 lru 是否为 nil，因为在加锁期间可能被其他 goroutine 初始化
+//	if c.lru == nil {
+//		return
+//	}
+//	// 4. 获取值
+//	if v, ok := c.lru.Get(key); ok {
+//		// 5. 类型断言
+//		return v.(ByteView), ok
+//	}
+//	return
+//}
+
+// TODO 尝试去掉锁
 func (c *cache) get(key string) (value ByteView, ok bool) {
-	// 这里的思想是 双重检查锁定
+	// 这里的思想是 双重检查锁定  当然可以用once来优化
 	// 1. 先检查 lru 是否为 nil
 	if c.lru == nil {
 		return
 	}
-	// 2. 加锁
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// 3. 检查 lru 是否为 nil，因为在加锁期间可能被其他 goroutine 初始化
-	if c.lru == nil {
-		return
-	}
+	// 2. 不加锁了
 	// 4. 获取值
 	if v, ok := c.lru.Get(key); ok {
 		// 5. 类型断言
