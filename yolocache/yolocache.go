@@ -1,12 +1,14 @@
 package yolocache
 
 import (
+	"YoloCache/yolocache/singleflight"
 	"fmt"
 	"log"
 	"sync"
 )
 
 /*
+*
 ************************实现主体结构Group*************************
 Group是YoloCache最核心的数据结构，负责与用户交互，控制缓存存储和获取的主流程
 
@@ -18,13 +20,19 @@ Group是YoloCache最核心的数据结构，负责与用户交互，控制缓存
                             |-----> 调用`回调函数`，获取值并添加到缓存 --> 返回缓存值 ⑶
 */
 
+// Group /*
+// !!!day6  TODO!!! 注意理解Group的这几个成员变量，为什么有的类型是对应的结构体类型，而loader是引用类型！！！
+// day6 因为对于loader来说，这个管理请求的数据结构，应该是需要在多个Group实例中共享的，所以要是指针类型
+// 而对于name,mainCache，每个节点的实例都是独立的，所以选择传递值
+// TODO: 但这就产生了另外的一个问题，peers和getter,应该也是每个节点都一致的吧？ 按理来说也可以使用指针类型
 type Group struct {
 	// 一个Group可以认为是一个缓存的命名空间，每个Group拥有一个唯一的名称name
 	//比如可以创建三个 Group，缓存学生的成绩命名为 scores，缓存学生信息的命名为 info，缓存学生课程的命名为 courses。
-	name      string
-	getter    Getter     // 第二个属性是 getter Getter，即缓存未命中时获取源数据的回调(callback)。
-	mainCache cache      // 第三个属性是 mainCache cache，即一开始实现的并发缓存。
-	peers     PeerPicker // 将用于获取远程节点
+	name      string              // 每个Group拥有唯一的名称name
+	getter    Getter              // 第二个属性是 getter Getter，即缓存未命中时获取源数据的回调(callback)。
+	mainCache cache               // 第三个属性是 mainCache cache，即一开始实现的并发缓存。
+	peers     PeerPicker          // 将用于获取远程节点
+	loader    *singleflight.Group // 管理请求的数据结构，这里为什么要想到把singleflight里的group加到Group中？ 可以想到， 他们应该在一起初始化。所以下一步就是更新初始化函数
 }
 
 var (
@@ -51,6 +59,7 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		name:      name,
 		getter:    getter,
 		mainCache: cache{cacheBytes: cacheBytes},
+		loader:    &singleflight.Group{},
 	}
 	groups[name] = g
 	return g
@@ -93,18 +102,26 @@ func (g *Group) Get(key string) (ByteView, error) {
 // 当在本节点没有找到时，调用load尝试从其他节点获取
 // 设计时预留：分布式场景下，load 会先从远程节点获取 getFromPeer，失败了再回退到 getLocally
 func (g *Group) load(key string) (value ByteView, err error) {
-	// 如果有其他节点存在
-	if g.peers != nil {
-		// 如果是分布式节点，从其他节点获取， 这里p返回的peer是目标节点的
-		if peer, ok := g.peers.PickPeer(key); ok {
-			// 再用这个baseurl传入getFromPeer函数中，去获取这个key的value
-			if value, err = g.getFromPeer(peer, key); err == nil {
-				return value, nil // 从其他节点获取成功，返回
+	// 使用g.loader.Do包裹原来的代码，这样确保了在并发场景下针对相同的key,load过程只会调用一次 day6
+	view, err := g.loader.Do(key, func() (interface{}, error) {
+		// 如果有其他节点存在
+		if g.peers != nil {
+			// 如果是分布式节点，从其他节点获取， 这里p返回的peer是目标节点的
+			if peer, ok := g.peers.PickPeer(key); ok {
+				// 再用这个baseurl传入getFromPeer函数中，去获取这个key的value
+				if value, err = g.getFromPeer(peer, key); err == nil {
+					return value, nil // 从其他节点获取成功，返回
+				}
+				log.Println("[YoloCache] Failed to get from peer", err)
 			}
-			log.Println("[YoloCache] Failed to get from peer", err)
 		}
+		return g.getLocally(key)
+	})
+	// day6
+	if err == nil {
+		return view.(ByteView), nil
 	}
-	return g.getLocally(key)
+	return
 }
 
 func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {

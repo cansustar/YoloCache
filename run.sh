@@ -15,6 +15,10 @@ echo ">>> start test"
 curl "http://localhost:9999/api?key=Tom" &
 curl "http://localhost:9999/api?key=Tom" &
 curl "http://localhost:9999/api?key=Tom" &
+curl "http://localhost:9999/api?key=Tom" &
+curl "http://localhost:9999/api?key=Tom" &
+
+
 # 使用 wait 命令等待所有后台任务完成。这包括三个 server 实例的运行以及三个并发的 curl 请求。
 wait
 
