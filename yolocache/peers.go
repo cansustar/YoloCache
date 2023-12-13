@@ -1,5 +1,7 @@
 package yolocache
 
+import pb "YoloCache/yolocache/yolocachepb"
+
 /*
 *******************************注册节点， 借助一致性哈希算法选择节点*********************************
 
@@ -32,7 +34,13 @@ type PeerPicker interface {
 
 // PeerGetter 对应于上述流程中的HTTP客户端，使用Get方法从对应group查找缓存值
 // 该接口对应着，http客户端请求去找值
+//type PeerGetter interface {
+//	// Get 用于从对应group查找缓存值
+//	Get(group string, key string) ([]byte, error)
+//}
+
 type PeerGetter interface {
 	// Get 用于从对应group查找缓存值
-	Get(group string, key string) ([]byte, error)
+	//Get(in *pb.Request, out *pb.Response) ([]byte, error)
+	Get(in *pb.Request, out *pb.Response) error
 }

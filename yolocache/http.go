@@ -2,7 +2,9 @@ package yolocache
 
 import (
 	"YoloCache/yolocache/consistenthash"
+	pb "YoloCache/yolocache/yolocachepb"
 	"fmt"
+	"github.com/golang/protobuf/proto"
 	"io"
 	"log"
 	"net/http"
@@ -82,7 +84,8 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// 根据key获取缓存值
-	view, err := group.Get(key)
+	view, err := group.Get(key) // RPC调用前的版本
+	body, err := proto.Marshal(&pb.Response{Value: view.ByteSlice()})
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -91,7 +94,8 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 将缓存值写入到ResponseWriter
 	w.Header().Set("Content-Type", "application/octet-stream")
 	// 使用 w.Write() 将缓存值作为 httpResponse 的 body 返回。
-	w.Write(view.ByteSlice())
+	//w.Write(view.ByteSlice())
+	w.Write(body)
 }
 
 /*
@@ -103,31 +107,35 @@ type httpGetter struct { // httpGetter实现了peerGetter的Get函数
 	baseURL string
 }
 
-func (h *httpGetter) Get(group string, key string) ([]byte, error) {
+// Get func (h *httpGetter) Get(group string, key string) ([]byte, error) {  RPC调用前的版本
+func (h *httpGetter) Get(in *pb.Request, out *pb.Response) error {
 	u := fmt.Sprintf(
 		"%v%v/%v",
 		h.baseURL, // baseURL这里的最后一个字符是 /，所以不用再加了
-		url.QueryEscape(group),
-		url.QueryEscape(key),
+		url.QueryEscape(in.GetGroup()),
+		url.QueryEscape(in.GetKey()),
 	) //
 	// TODO 与远程节点通信 可以考虑使用rpc
 	res, err := http.Get(u) // 向远程节点发送HTTP请求
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer res.Body.Close()
 	// 如果返回的状态码不是OK，就返回错误
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned: %v", res.Status)
+		return fmt.Errorf("server returned: %v", res.Status)
 	}
 	// 读取body
 	bytes, err := io.ReadAll(res.Body)
 
 	if err != nil {
-		return nil, fmt.Errorf("reading response body: %v", err)
+		return fmt.Errorf("reading response body: %v", err)
 	}
 
-	return bytes, nil
+	if err = proto.Unmarshal(bytes, out); err != nil {
+		return fmt.Errorf("decoding response body: %v", err)
+	}
+	return nil
 }
 
 // 表示创建了一个 *httpGetter 类型的 nil 值，并将其转换为 PeerGetter 接口类型。   类型断言：v.(ByteView)

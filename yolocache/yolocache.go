@@ -2,6 +2,7 @@ package yolocache
 
 import (
 	"YoloCache/yolocache/singleflight"
+	pb "YoloCache/yolocache/yolocachepb"
 	"fmt"
 	"log"
 	"sync"
@@ -125,12 +126,24 @@ func (g *Group) load(key string) (value ByteView, err error) {
 }
 
 func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
-	// 调用peer的Get方法，向其他节点发起请求，查询value
-	bytes, err := peer.Get(g.name, key)
+	// RPC前的版本
+	//// 调用peer的Get方法，向其他节点发起请求，查询value
+	//bytes, err := peer.Get(g.name, key)
+	//if err != nil {
+	//	return ByteView{}, err
+	//}
+	//return ByteView{b: bytes}, nil
+	req := &pb.Request{
+		Group: g.name,
+		Key:   key,
+	}
+	res := &pb.Response{}
+	err := peer.Get(req, res)
 	if err != nil {
 		return ByteView{}, err
 	}
-	return ByteView{b: bytes}, nil
+	return ByteView{b: res.Value}, nil
+
 }
 
 // 从本地没找到，先尝试去从其他节点找，如果其他节点也没找到的话，那就再返回本地来，去调用的回调函数，获取数据源中的数据，再添加到缓存中并返回
